@@ -32,7 +32,7 @@
   ],
   "license": "MIT",
   "scripts": {
-    "smoke": "node --test smoke/host-smoke.mjs smoke/timing-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs smoke/lifecycle-check.mjs && node smoke/client-smoke.mjs && node smoke/timer-check.mjs && node smoke/window-smoke.mjs && node smoke/toast-check.mjs && node smoke/e2e-toast.mjs 5",
+    "smoke": "node --test smoke/host-smoke.mjs smoke/timing-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs smoke/lifecycle-check.mjs && node smoke/client-smoke.mjs && node smoke/timer-check.mjs && node smoke/fire-twice.mjs && node smoke/window-smoke.mjs && node smoke/toast-check.mjs && node smoke/e2e-toast.mjs 5",
     "smoke:host": "node --test smoke/host-smoke.mjs",
     "smoke:timing": "node --test smoke/timing-smoke.mjs",
     "smoke:wire": "node --test smoke/wire-smoke.mjs",
@@ -40,6 +40,7 @@
     "smoke:lifecycle": "node --test smoke/lifecycle-check.mjs",
     "smoke:client": "node smoke/client-smoke.mjs",
     "smoke:timer": "node smoke/timer-check.mjs",
+    "smoke:twice": "node smoke/fire-twice.mjs",
     "smoke:window": "node smoke/window-smoke.mjs",
     "smoke:toast": "node smoke/toast-check.mjs",
     "smoke:e2e": "node smoke/e2e-toast.mjs 5"
