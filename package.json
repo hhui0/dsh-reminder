@@ -1,14 +1,15 @@
 {
   "name": "dsh-reminder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "提醒插件：DSH 里说一句话就定时提醒，到点弹出窗口 + 提示音，还能把 DSH 窗口唤到前台。",
+  "description": "提醒插件：DSH 里说一句话就定时提醒，到点在屏幕右下角弹独立小窗 + 三音提示音（同 electron_demo 的提醒小窗）。",
   "type": "module",
   "main": "lib/host.js",
   "exports": {
     ".": "./lib/host.js",
     "./client": "./lib/client.js",
     "./parsing": "./lib/parsing.js",
+    "./toast": "./lib/toast.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -16,19 +17,29 @@
     "lib/host.js",
     "lib/parsing.js",
     "lib/window.js",
+    "lib/toast.js",
     "lib/client.js",
+    "toast/main.js",
+    "toast/preload.js",
+    "toast/toast.js",
+    "toast/toast.html",
+    "toast/package.json",
     "scripts/dsh-window.ps1",
     "cordis.patch.yml",
     "README.md"
   ],
   "license": "MIT",
   "scripts": {
-    "smoke": "node --test smoke/host-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs && node smoke/client-smoke.mjs && node smoke/window-smoke.mjs",
+    "smoke": "node --test smoke/host-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs smoke/lifecycle-check.mjs && node smoke/client-smoke.mjs && node smoke/timer-check.mjs && node smoke/window-smoke.mjs && node smoke/toast-check.mjs && node smoke/e2e-toast.mjs 5",
     "smoke:host": "node --test smoke/host-smoke.mjs",
     "smoke:wire": "node --test smoke/wire-smoke.mjs",
     "smoke:http": "node --test smoke/http-smoke.mjs",
+    "smoke:lifecycle": "node --test smoke/lifecycle-check.mjs",
     "smoke:client": "node smoke/client-smoke.mjs",
-    "smoke:window": "node smoke/window-smoke.mjs"
+    "smoke:timer": "node smoke/timer-check.mjs",
+    "smoke:window": "node smoke/window-smoke.mjs",
+    "smoke:toast": "node smoke/toast-check.mjs",
+    "smoke:e2e": "node smoke/e2e-toast.mjs 5"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "~3.18.4"
@@ -39,7 +50,7 @@
   "dsh": {
     "meta": {
       "title": "提醒",
-      "description": "说一句「10 分钟后提醒我」，到点弹窗 + 提示音"
+      "description": "说一句「10 秒后提醒我」，到点在右下角弹提醒小窗 + 提示音"
     },
     "client": {
       "platform": "web"

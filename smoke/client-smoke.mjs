@@ -116,6 +116,12 @@ const fakeWindow = {
 globalThis.window = fakeWindow
 globalThis.document = fakeDocument
 globalThis.localStorage = fakeLocalStorage
+// 页面浮层默认是**关闭**的（到点改由右下角的独立小窗负责），所以这里先把偏好种成
+// 「浮层打开」，才能验证浮层那条链路本身；关闭时的行为在设置页那一段单独验。
+fakeLocalStorage.setItem(
+  'dsh.reminder.ui.v1',
+  JSON.stringify({ sound: 'chime', volume: 0.6, repeat: 3, activateWindow: true, toastWindow: true, pageOverlay: true })
+)
 
 let evaluateError = null
 try {
@@ -465,10 +471,35 @@ try {
 await tick(20)
 check('settings: 切换开关不抛错', toggleError === null, String(toggleError))
 check(
-  'settings: 开关回写到了 host',
-  calls.some((item) => item.method === 'settings' && item.args?.activateWindow === false),
+  'settings: 窗口/小窗开关回写到了 host',
+  calls.some((item) => item.method === 'settings' && (item.args?.activateWindow === false || item.args?.toastWindow === false)),
   JSON.stringify(calls.filter((item) => item.method === 'settings'))
 )
+
+// 「页面浮层」关掉之后，到点的提醒**不该**再盖住 DSH：这条链路是可选的，而它默认关闭，
+// 所以必须有测试守住「关了就真的不弹、也不出声」，否则双弹/双响的问题会悄悄回来。
+const pageOverlayToggle = [...pageContainer.querySelectorAll('input[type=checkbox]')].at(-1)
+check('settings: 有「同时在 DSH 页面里盖一层浮层」开关', pageOverlayToggle !== undefined)
+const audioBeforeSuppress = audioActivity.starts
+await act(async () => {
+  pageOverlayToggle?.click()
+})
+const overdue = { id: 'suppress-1', title: '不该出现在浮层里', scheduledAt: Date.now() - 1000, firedAt: Date.now(), repeat: 'once', status: 'fired' }
+// 页面的长轮询在后台还在跑（它负责清单同步），把这一轮的答案灌给它。
+const waiting = pendingPolls.shift()
+waiting?.resolve({
+  ok: true,
+  status: 200,
+  async json() {
+    return { ok: true, value: { reminders: [overdue], settings: {}, now: Date.now() } }
+  }
+})
+await tick(40)
+// 浮层这时候已经是空的（前面点过「知道了」），静态渲染一次确认它不会为这条新建卡片。
+const suppressedHtml =
+  mountError === null ? renderToStaticMarkup(React.createElement(Overlay, { t: (key) => zhDict[key] ?? key })) : ''
+check('overlay: 浮层关闭时不再盖住页面', !suppressedHtml.includes('不该出现在浮层里'), suppressedHtml.slice(0, 200))
+check('sound: 浮层关闭时页面也不发声（交给小窗）', audioActivity.starts === audioBeforeSuppress, `${audioBeforeSuppress} → ${audioActivity.starts}`)
 
 // 新建一条提醒：参数名必须与 host 的 `reminderRequest` 一致（title / at / repeat）。
 const titleInput = pageContainer.querySelector('input[type=text]')

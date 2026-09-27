@@ -59,6 +59,15 @@ describe('parseRelativeMs', () => {
     assert.equal(parseRelativeMs('1天2小时'), 26 * 3600000)
   })
 
+  it('秒级也认（「10 秒后」是最短的验证写法）', () => {
+    assert.equal(parseRelativeMs('10s'), 10000)
+    assert.equal(parseRelativeMs('10 秒'), 10000)
+    assert.equal(parseRelativeMs('45秒钟'), 45000)
+    assert.equal(parseRelativeMs('半分钟'), 30000)
+    assert.equal(parseWhen('10s', BASE), BASE + 10000)
+    assert.equal(parseWhen('10 秒', BASE), BASE + 10000)
+  })
+
   it('拒绝认不出来的东西', () => {
     assert.equal(parseRelativeMs(''), undefined)
     assert.equal(parseRelativeMs('开会'), undefined)
@@ -138,13 +147,18 @@ describe('normalizeReminder / normalizeSettings', () => {
       volume: 0.6,
       repeat: 3,
       activateWindow: true,
+      toastWindow: true,
       autoDismissSeconds: 0
     })
     assert.equal(normalizeSettings({ volume: 9 }).volume, 1)
     assert.equal(normalizeSettings({ volume: -3 }).volume, 0)
     assert.equal(normalizeSettings({ sound: '不存在的音色' }).sound, 'chime')
+    assert.equal(normalizeSettings({ sound: 'tts' }).sound, 'tts')
+    assert.equal(normalizeSettings({ sound: 'off' }).sound, 'off')
     assert.equal(normalizeSettings({ repeat: 999 }).repeat, 20)
     assert.equal(normalizeSettings({ activateWindow: 'yes' }).activateWindow, false)
+    assert.equal(normalizeSettings({ toastWindow: 'yes' }).toastWindow, false)
+    assert.equal(normalizeSettings({ toastWindow: true }).toastWindow, true)
   })
 })
 

@@ -1,0 +1,7 @@
+{
+  "name": "dsh-reminder-toast",
+  "version": "0.1.0",
+  "private": true,
+  "description": "dsh-reminder 的提醒小窗：一个只办一件事的 Electron 进程，负责右下角弹卡 + 三音提示音。",
+  "main": "main.js"
+}
