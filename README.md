@@ -102,8 +102,9 @@ lib/client.js    shell.overlay 弹窗、提示音合成、settings.section 设�
 
 ```powershell
 node --check lib/host.js; node --check lib/client.js; node --check lib/parsing.js; node --check lib/window.js
-node --test smoke/host-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs
+node --test smoke/host-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs smoke/lifecycle-check.mjs
 node smoke/client-smoke.mjs
+node smoke/timer-check.mjs
 node smoke/window-smoke.mjs
 ```
 
@@ -112,30 +113,45 @@ node smoke/window-smoke.mjs
 | `smoke/host-smoke.mjs` | 30 | 时间解析、持久化、到点判定、循环排程、迟到丢弃、长轮询唤醒与去重 |
 | `smoke/wire-smoke.mjs` | 3 | 用真的 Cordis 上下文激活：服务挂成 `ctx.get('reminders')`、三个工具与 `/reminder` 命令、路由注册、卸载后定时器停止 |
 | `smoke/http-smoke.mjs` | 5 | `/api/call` 的方法派发与信封、坏输入的错误码、`/api/pending` 的超时与去重、只有本机能访问 |
+| `smoke/lifecycle-check.mjs` | 1 | **真实生命周期 + 真实时间**：激活后定时器自己在走、到点写成「已响」、卸载后停表 |
 | `smoke/client-smoke.mjs` | 46 | 模块加载、两个座位注册、到点弹窗、按钮打到 host、设置页、静音真的没声音 |
+| `smoke/timer-check.mjs` | 6 | 真实时间下的 store + scheduler（不手动调 `tick()`） |
 | `smoke/window-smoke.mjs` | 10 | PowerShell 探测、脚本可解析、`-Action status` 真跑一次（实测输出 `window=5243272 rect=1936x1048@(-8,-8) visible=True iconic=False`） |
+
+另有五个**现场排查工具**（只读、可以随便跑，它们的注释里写清了各自的坑）：
+
+| 脚本 | 干什么 |
+|---|---|
+| `smoke/delivery-check.mjs` | 自己建一条十几秒后的提醒并高频盯 `/api/pending`，验证「到点」这件事真的被发布出来 |
+| `smoke/clock-check.mjs` | 比对宿主与本进程的 `Date.now()`（提醒的「迟到丢弃」完全依赖两边的时钟一致） |
+| `smoke/fire-check.mjs` | 采样 DSH 窗口是否在前台 + `/api/pending` 的内容，验证唤窗口那一步 |
+| `smoke/rapid-fire-check.mjs` | 250 毫秒一次的探针，用来抢在页面之前看到到点事件 |
 
 这套测试抓出来的真实缺陷（不是补上去的装饰）：
 
 1. 调度器只在「有提醒响」时唤醒长轮询，于是提醒到点若恰好落在长轮询挂上之前，要等这次长轮询超时（最多 20 秒）才弹出来。改成每 tick 检查「还有没有待确认的提醒」。
-2. `ReminderService` 写了 `start()` / `stop()` 当作生命周期钩子——Cordis 的 `Service` 没有这两个钩子，它们永远不会被调用，症状是「插件装好了、工具也在、提醒从来不响」。改成在构造函数里用 `ctx.effect` 起表。
-3. host 不校验 `repeat`，把 `"off"` 之类的非法值静默降级成 `once`（「我明明说了每天，它只响了一次」）。改成明确报错。
-4. 客户端测试第一次把「音色」下拉框和「重复」下拉框搞混了——因为重复是页面里第一个 `select`。测试改成按选项内容定位，而不是按位置。
+2. `ReminderService` 写了 `start()` / `stop()` 当作生命周期钩子——Cordis 的 `Service` 没有这两个钩子，它们永远不会被调用，症状是「插件装好了、工具也在、提醒从来不响」。改成在构造函数里注册。
+3. **定时器注册错了上下文**（线上实测才发现，前面所有测试都是绿的）：`ctx.plugin()` 返回的子 fiber 是异步启动的，注册在**父**上下文上的 `ctx.effect(() => { start(); return () => stop() })` 会被子 fiber 的启动流程清理一遍，于是定时器刚建好就被停掉。改成挂在服务自己的 `this.ctx` 上。补了 `lifecycle-check.mjs` / `timer-check.mjs` 两条真实时间的测试，因为此前所有调度测试都用假时钟并手动调 `tick()`，「定时器根本不在走」一直藏在盲区里。
+4. host 不校验 `repeat`，把 `"off"` 之类的非法值静默降级成 `once`（「我明明说了每天，它只响了一次」）。改成明确报错。
+5. `handleRequest` 被 `void` 掉，`webServer` 收不到「这次请求处理完了没有」的信号。改成把 promise 返回上去。
+6. 客户端测试把「音色」和「重复」两个下拉框搞混了——因为重复是页面里第一个 `select`。测试改成按选项内容定位，而不是按位置。
 
 `smoke/` 里的 React 与 jsdom 是**测试夹具**（装在 `smoke/node_modules`），刻意不放进插件依赖：DSH 是就地加载这个包的，把别人的框架放到被加载的路径上会污染运行时。
 
 已经验证的：
 
-- 四个 lib 文件语法通过；五套冒烟测试共 **94 条断言**全绿（30 + 3 + 5 + 46 + 10）。
+- 四个 lib 文件语法通过；七套冒烟测试共 **101 条断言**全绿（30 + 3 + 5 + 1 + 46 + 6 + 10）。
 - 在真的 Cordis 上下文里激活成功：服务、工具、命令、路由都挂上了，`/reminder 30m 开会` 真的建出一条提醒，卸载后定时器停止。
+- 真实生命周期 + 真实时间下，定时器会自己走到点（`lifecycle-check.mjs` / `timer-check.mjs`）。
 - 本机路由的 HTTP 行为（信封、错误码、长轮询超时与去重、本机限制）。
-- `scripts/dsh-window.ps1 -Action status` 真跑过，并在这台机器上找到了 DSH 主窗口。
+- 装进当前 Profile 后，`reminder_set` / `reminder_list` / `reminder_cancel` 三个工具真的出现在工具表里并能建、列、删提醒；`shell.overlay` 的 `reminder` 与 `settings.section` 的 `reminder` 两个座位都 `active`。
+- `scripts/dsh-window.ps1 -Action status` 真跑过，并在这台机器上找到了 DSH 主窗口（`window=5243272 rect=1936x1048@(-8,-8) visible=True iconic=False`）。
+- 宿主时钟与本机时钟的偏差（`clock-check.mjs`：4 次采样最大 14ms）。
 
 **没有验证的**（需要活着的宿主与真实窗口，我做不了）：
 
-- 在真实 DSH 里挂载这一行、工具被模型调用、`/reminder` 命令出现在命令面板；
-- 真实弹窗的视觉（间距、明暗主题下的观感）与真实响铃的音量手感；
-- Win32 唤窗口在「应用最小化 / 收进托盘 / 在后面」三种状态下的实际效果（只验了只读的 `status` 路径，没有真的抢过前台）；
+- **弹窗与提示音在真实页面上长什么样**——这是最重要的一条。装好插件后我触发了多条测试提醒，但运行中的 DSH 仍跑着旧模块（ESM 按 URL 缓存），所以「到点响」这条链路的最后一环（页面弹窗 + Web Audio 发声）我无法自己确认，需要重启 DSH 后当场看一次。**如果你在装好之后从没见过提醒弹窗，那是预期内的：修好的那一版还没被加载。**
+- Win32 唤窗口在「应用最小化 / 收进托盘 / 在后面」三种状态下的实际效果（只验了只读的 `status` 路径，没有真的抢过前台）。
 - 长轮询在真实浏览器里的时序（比如窗口最小化时浏览器对定时器的节流）。
 
 ## 已知限制
