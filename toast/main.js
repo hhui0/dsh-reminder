@@ -95,7 +95,12 @@ if (process.versions.electron === undefined || app === undefined || app === null
 
 /**
  * 记一行诊断。
- * @param line - 内容（调用方保证不含换行）。
+ *
+ * **只写 ASCII**：这个文件会被人在 PowerShell 里 `Get-Content` 看，而 PowerShell 默认按
+ * 系统 ANSI 解码 UTF-8 文件——中文会变成乱码、一行被拆成好几段，日志就废了。
+ * 提醒内容本身（标题、备注）是 UTF-8，但那部分在 payload 文件里，不在日志里。
+ *
+ * @param line - 内容（调用方保证不含换行，且只用 ASCII）。
  */
 function log(line) {
   const text = `[toast] ${new Date().toISOString()} ${line}`
@@ -121,7 +126,7 @@ function readPayload() {
     try {
       return JSON.parse(fs.readFileSync(String(file), 'utf8'))
     } catch (error) {
-      log(`payload 文件读不动：${String(error && error.message)}`)
+      log(`payload file unreadable: ${String(error && error.message)}`)
       return null
     }
   }
@@ -130,14 +135,14 @@ function readPayload() {
   try {
     return JSON.parse(raw)
   } catch (error) {
-    log(`payload 不是 JSON：${String(error && error.message)}`)
+    log(`payload is not JSON: ${String(error && error.message)}`)
     return null
   }
 }
 
 const payload = readPayload()
 if (payload === null) {
-  log('没有收到有效的 payload，直接退出')
+  log('no valid payload, exiting')
   process.exit(2)
 }
 
@@ -151,7 +156,7 @@ if (payload === null) {
 try {
   app.setPath('userData', path.join(app.getPath('temp'), 'dsh-reminder-toast'))
 } catch (error) {
-  log(`设置 userData 失败（忽略）：${String(error && error.message)}`)
+  log(`setPath(userData) failed (ignored): ${String(error && error.message)}`)
 }
 
 /** 这次要展示的提醒 id：「稍后」时用它派生新的 id。 */
@@ -187,7 +192,8 @@ function deliver() {
   if (delivered || win === null || win.isDestroyed()) return
   delivered = true
   win.webContents.send('toast:add', payload)
-  log(`已投递 payload id=${reminderId} label=${String(payload.label || '')} ttl=${String(payload.ttlSeconds)} ack=${String(payload.requireAck)}`)
+  // id 之外都不写进日志：标题是任意 UTF-8，写进去就会在 PowerShell 里变乱码。
+  log(`delivered payload id=${reminderId} ttl=${String(payload.ttlSeconds)} ack=${String(payload.requireAck)}`)
 }
 
 /**
@@ -200,7 +206,7 @@ function armExit() {
   const ttl = Number(payload.ttlSeconds)
   const seconds = Number.isFinite(ttl) && ttl > 0 ? Math.min(MAX_TTL_SECONDS, ttl) : MAX_TTL_SECONDS
   exitTimer = setTimeout(() => {
-    log(`到时间（${seconds}s）自动退出`)
+    log(`ttl reached (${seconds}s), exiting`)
     quit(0)
   }, seconds * 1000)
 }
@@ -222,7 +228,7 @@ function snooze(minutes) {
   const value = Number(minutes)
   if (!Number.isFinite(value) || value <= 0) return
   clearExit()
-  log(`稍后 ${value} 分钟`)
+  log(`snooze ${value} minutes`)
   const next = { ...payload, id: `${reminderId}-snooze-${Date.now()}`, time: '' }
   setTimeout(() => {
     if (win !== null && !win.isDestroyed()) {
@@ -284,7 +290,7 @@ app.whenReady().then(() => {
 
   // 内容量出来之前不要露脸，否则会先闪一个 380×150 的空窗。
   win.webContents.once('did-finish-load', () => {
-    log('页面加载完成')
+    log('page loaded')
     // 兜底投递：正常情况下页面会先发 `toast:ready`，但两者谁先到不保证。
     setTimeout(() => {
       deliver()
@@ -295,13 +301,13 @@ app.whenReady().then(() => {
   })
 
   win.loadFile(path.join(__dirname, 'toast.html')).catch((error) => {
-    log(`loadFile 失败：${String(error && error.message)}`)
+    log(`loadFile failed: ${String(error && error.message)}`)
     quit(3)
   })
 })
 
 ipcMain.on('toast:ready', () => {
-  log('渲染器就绪')
+  log('renderer ready')
   deliver()
 })
 
@@ -312,14 +318,14 @@ ipcMain.on('toast:resize', (_event, height) => {
   const [, current] = win.getSize()
   // 记一行：排查「右边多了一条滚动条 / 卡片被裁掉」时，先要确认页面报的高度与窗口实际
   // 高度是不是同一个数。这类问题光看截图看不出来。
-  log(`resize 请求 height=${value} 当前=${current}`)
+  log(`resize requested height=${value} current=${current}`)
   if (Math.abs(current - value) < 2) return
   win.setSize(WINDOW_WIDTH, value)
   position()
 })
 
 ipcMain.on('toast:empty', () => {
-  log('卡片已清空，退出')
+  log('cards empty, exiting')
   clearExit()
   // 给一点时间让最后一次 resize 落下去，再退。
   setTimeout(() => quit(0), 120)

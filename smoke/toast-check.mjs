@@ -12,11 +12,21 @@
  */
 import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { TOAST_DIR, electronCandidates, pickElectron, spawnToast, toastArgs, toastEnv, toastPayload, writePayloadFile } from '../lib/toast.js'
+import {
+  TOAST_DIR,
+  electronCandidates,
+  pickElectron,
+  spawnToast,
+  sweepPayloads,
+  toastArgs,
+  toastEnv,
+  toastPayload,
+  writePayloadFile
+} from '../lib/toast.js'
 
 let passed = 0
 const failures = []
@@ -112,6 +122,27 @@ check('payload 文件：内容可被重新解析', (() => {
   }
 })())
 
+// 过期回收：只靠「拉起成功后 N 秒删」不够——那个定时器是 unref 的，而调用方（宿主之外的
+// 脚本）可能早在它触发之前就退出了，实测因此堆了 35 个文件。这里直接验回收逻辑。
+check('payload 回收：过期的删掉、新的与别的文件留下', (() => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-reminder-sweep-'))
+  try {
+    const old = join(dir, 'old.json')
+    const fresh = join(dir, 'fresh.json')
+    const other = join(dir, 'keep.txt')
+    writeFileSync(old, '{}', 'utf8')
+    writeFileSync(fresh, '{}', 'utf8')
+    writeFileSync(other, 'x', 'utf8')
+    const past = new Date(Date.now() - 20 * 60000)
+    utimesSync(old, past, past)
+    const removed = sweepPayloads(dir)
+    return removed === 1 && !existsSync(old) && existsSync(fresh) && existsSync(other)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})())
+check('payload 回收：目录不存在时不抛错', sweepPayloads(join(tmpdir(), `dsh-reminder-missing-${Date.now()}`)) === 0)
+
 check('spawn：找不到 Electron 时不抛错，而是返回 reason', await (async () => {
   const result = await spawnToast({
     payload,
@@ -206,12 +237,12 @@ if (electron.path === undefined || !existsSync(electron.path)) {
   console.log('      小窗日志：')
   for (const line of log.trim().split('\n')) console.log(`        ${line}`)
 
-  check('真跑：小窗应用加载了页面', log.includes('页面加载完成'), log.slice(0, 200))
-  check('真跑：渲染器执行了 toast.js 并报到', log.includes('渲染器就绪'), log.slice(0, 300))
-  check('真跑：payload 已投递进窗口', log.includes('已投递 payload'), log.slice(0, 300))
+  check('真跑：小窗应用加载了页面', log.includes('page loaded'), log.slice(0, 200))
+  check('真跑：渲染器执行了 toast.js 并报到', log.includes('renderer ready'), log.slice(0, 300))
+  check('真跑：payload 已投递进窗口', log.includes('delivered payload'), log.slice(0, 300))
   check('真跑：提示音没有失败', !log.includes('chime-failed'), log.slice(0, 300))
   // 干净的退出有两条路：卡片到时消失（ttlSeconds），或用户点「收到」后清空。
-  check('真跑：干净退出（没有留下常驻窗口）', exited === true && /自动退出|卡片已清空/.test(log), `exited=${exited} code=${code}`)
+  check('真跑：干净退出（没有留下常驻窗口）', exited === true && /ttl reached|cards empty/.test(log), `exited=${exited} code=${code}`)
 
   if (!exited) {
     try {

@@ -66,7 +66,8 @@ while (Date.now() < deadline && !(consumed && toastSeen)) {
   const store = readText(dataFile)
   consumed = !store.includes(reminder.id)
   const log = readText(toastLog).slice(logOffset)
-  toastSeen = log.includes(`已投递 payload id=${reminder.id}`)
+  // 两种写法都认：跑着的宿主可能还是旧的那版（日志里有中文），重启后是纯 ASCII。
+  toastSeen = new RegExp(`(?:delivered|已投递) payload id=${reminder.id}`).test(log)
 }
 
 const log = readText(toastLog).slice(logOffset)
@@ -77,8 +78,8 @@ const checks = [
   ['host 收下了这条提醒', reminder.id !== undefined],
   [`到点被消费掉（清单里不再有 ${reminder.id}）`, consumed],
   ['提醒小窗真的被拉起并投递', toastSeen],
-  ['小窗页面渲染完成', log.includes('页面加载完成')],
-  ['渲染器执行了 toast.js', log.includes('渲染器就绪')],
+  ['小窗页面渲染完成', /(?:page loaded|页面加载完成)/.test(log)],
+  ['渲染器执行了 toast.js', /(?:renderer ready|渲染器就绪)/.test(log)],
   ['提示音没失败', !log.includes('chime-failed')]
 ]
 let failed = 0

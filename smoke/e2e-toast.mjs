@@ -61,16 +61,16 @@ console.log('[e2e] 小窗日志：')
 for (const line of log.trim().split('\n')) console.log(`      ${line}`)
 
 const checks = [
-  ['页面加载完成', log.includes('页面加载完成')],
-  ['渲染器就绪（toast.js 跑了）', log.includes('渲染器就绪')],
-  ['payload 已投递', log.includes(`已投递 payload id=${reminder.id}`)],
+  ['页面加载完成（page loaded）', log.includes('page loaded')],
+  ['渲染器就绪（renderer ready）', log.includes('renderer ready')],
+  ['payload 已投递', log.includes(`delivered payload id=${reminder.id}`)],
   // 长标题一定会让内容高于初始的 150px，所以必须有 resize 请求；这也顺带证明
   // 「窗口高度跟着内容走」这条链路是通的（右边不会多出滚动条）。
-  ['窗口按内容高度调整过', /resize 请求 height=\d+/.test(log)],
+  ['窗口按内容高度调整过', /resize requested height=\d+/.test(log)],
   ['提示音没失败', !log.includes('chime-failed')],
   // 两条正常的退出路径都算通过：卡片自己到时消失（`ttlSeconds`），或者用户点了「收到」
   // 之后卡片清空。这两条都意味着进程干净收尾，没有留下常驻窗口。
-  ['干净退出（到时消失或点「收到」）', /自动退出|卡片已清空/.test(log)]
+  ['干净退出（到时消失或点「收到」）', /ttl reached|cards empty/.test(log)]
 ]
 let failed = 0
 for (const [label, ok] of checks) {
