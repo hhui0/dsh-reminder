@@ -227,6 +227,12 @@
       snoozeBtn.textContent = `稍后 ${snoozeMinutes} 分钟`
       snoozeBtn.addEventListener('click', () => {
         snoozeBtn.disabled = true
+        // 报一声：这条日志是「按钮真的被点到」的唯一证据，也是自检脚本的判据。
+        try {
+          window.toastAPI.report(`snooze clicked minutes=${snoozeMinutes}`)
+        } catch (err) {
+          /* 忽略 */
+        }
         try {
           window.toastAPI.snooze(snoozeMinutes)
         } catch (err) {
@@ -242,6 +248,11 @@
     ackBtn.textContent = '收到'
     ackBtn.addEventListener('click', () => {
       ackBtn.disabled = true
+      try {
+        window.toastAPI.report(`ack clicked id=${id}`)
+      } catch (err) {
+        /* 忽略 */
+      }
       removeItem(id)
     })
     actions.append(ackBtn)

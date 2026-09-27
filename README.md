@@ -140,14 +140,18 @@ lib/client.js    settings.section 设置页 + 可选的 shell.overlay 浮层 + �
 ## 已验证 / 未验证
 
 ```powershell
-node --check lib/host.js; node --check lib/client.js; node --check lib/parsing.js; node --check lib/window.js; node --check lib/toast.js
+node --check lib/host.js; node --check lib/client.js; node --check lib/parsing.js; node --check lib/timing.js
+node --check lib/window.js; node --check lib/toast.js
 node --check toast/main.js; node --check toast/toast.js; node --check toast/preload.js
-node --test smoke/host-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs smoke/lifecycle-check.mjs
+node --test smoke/host-smoke.mjs smoke/timing-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs smoke/lifecycle-check.mjs
 node smoke/client-smoke.mjs
 node smoke/timer-check.mjs
+node smoke/fire-twice.mjs        # 规则提醒连续两次到点（真实时间轴）
 node smoke/window-smoke.mjs
-node smoke/toast-check.mjs      # 会真的弹一个小窗，2 秒后自己消失
-node smoke/e2e-toast.mjs 6      # 走插件的真实调用路径，弹一个小窗，6 秒后消失
+node smoke/toast-check.mjs       # 会真的弹一个小窗，2 秒后自己消失
+node smoke/toast-buttons.mjs     # 会真的点「收到」/「稍后」，验证按钮链路
+node smoke/e2e-toast.mjs 6       # 走插件的真实调用路径，弹一个小窗，6 秒后消失
+node smoke/live-rule-check.mjs   # 打真实宿主：建一条规则提醒、等到点、核对小窗被投递
 ```
 
 | 脚本 | 条数 | 覆盖什么 |
@@ -160,9 +164,11 @@ node smoke/e2e-toast.mjs 6      # 走插件的真实调用路径，弹一个小�
 | `smoke/client-smoke.mjs` | 54 | 模块加载、两个座位注册、到点弹窗、按钮打到 host、设置页、静音真的没声音、关掉浮层后不弹也不响、窗口优先于时间 |
 | `smoke/timer-check.mjs` | 6 | 真实时间下的 store + scheduler（不手动调 `tick()`） |
 | `smoke/window-smoke.mjs` | 10 | PowerShell 探测、脚本可解析、`-Action status` 真跑一次（实测 `window=5243272 rect=1936x1048@(-8,-8) visible=True iconic=False`） |
-| `smoke/toast-check.mjs` | 28 | 探测/payload/参数/env 清理等纯逻辑 + **真跑一次小窗**（页面加载、渲染器报到、投递、响铃没失败、干净退出） |
+| `smoke/toast-check.mjs` | 30 | 探测/payload/参数/env 清理/过期回收等纯逻辑 + **真跑一次小窗**（页面加载、渲染器报到、投递、响铃没失败、干净退出） |
+| `smoke/toast-buttons.mjs` | 13 | **真的点一下卡片上的按钮**：走与真人点击完全相同的链路（DOM → preload → 主进程），验「收到」关窗、「稍后」留窗、ttl 自动消失 |
 | `smoke/e2e-toast.mjs` | 6 | 走插件的真实调用路径（detached + payload 文件 + 剥掉 `ELECTRON_RUN_AS_NODE`）拉起小窗，并用长标题逼出一次「按内容调高度」 |
 | `smoke/live-check.mjs` | 6 | 打真实宿主：`/api/call` 建一条十几秒后的提醒，核对清单被消费 + 小窗日志被投递 |
+| `smoke/live-rule-check.mjs` | 7 | 打真实宿主：建一条 cron 规则提醒、等它真的到点、核对「响了 / 还在清单 / 回到 active / 排了下一次 / 小窗被拉起」 |
 
 另有几个**现场排查/辅助工具**（注释里写清了各自的坑）：`delivery-check.mjs`（自建提醒 + 盯 `/api/pending`）、`clock-check.mjs`（比对宿主与本机时钟）、`fire-check.mjs`（采样窗口是否前台）、`rapid-fire-check.mjs`（250ms 探针）、`timer-detect.mjs`（插一条过期提醒，看宿主会不会改写清单）、`create-hourly-water.mjs`（用 14 条 daily 铺出「窗口内每小时」——cron 支持之前的临时做法）。
 
@@ -181,6 +187,11 @@ node smoke/e2e-toast.mjs 6      # 走插件的真实调用路径，弹一个小�
 11. 小窗卡片列表上的 `max-height: 80vh` + `overflow-y: auto`：窗口高度本来就等于内容高度，这条规则只会在内容偶尔高出一两像素时长出一条滚动条，而滚动条又把卡片挤窄、折出更多行。改成完全不滚动，并把「量高度」统一到一个函数。
 12. **清单与偏好撞成同一个文件**：早先只有一个回退路径、空值一律指向 `reminders.json`；而 Profile 的 patch 是整体替换 `config`（不是合并），于是「只覆盖了 `traceLog`」的配置下偏好文件也变成了清单文件。拆成两个解析函数，并加了一道「两者相同就换回默认偏好文件」的兜底。
 13. 页面那半边一度完全没有在轮询：原因是浏览器缓存了**旧的客户端 bundle**（里面根本没有后来的客户端代码）。硬刷新（Ctrl+Shift+R）之后 `reminder-trace.log` 立刻出现 `apply.enter v=2` → `loop.start` → 每 20 秒一轮 `poll.empty`。**改完客户端代码要硬刷新页面，否则看到的是旧包；改完 Host 代码要重启 DSH，ESM 是按 URL 缓存的。**
+14. **卡片上的按钮点了没反应**（用户报的）。原因是我当初为了「别抢打字焦点」把窗口设成 `focusable: false`——Windows/Chromium 对不可激活窗口的鼠标输入路由并不可靠。改成可聚焦 + `showInactive()`：窗口出现在最前但**不成为活动窗口**，你要打的字照样不被打断，而鼠标事件正常送达。
+15. 按钮链路此前**完全没有测试**：冒烟测试验的是「窗口会不会自己消失」，于是「点了没反应」可以一路通过全部测试。补了 `toast-buttons.mjs`（真的点一下）与 `--test-click` 自检通道。
+16. 点「稍后 5 分钟」之后窗口会在 15 秒时被自检兜底定时器关掉，那次推迟的提醒随之消失。兜底定时器现在会在「按钮被点到」时撤掉。
+17. 小窗日志里带中文：PowerShell 按 ANSI 读会乱码、日志行被拆开，我据此误判过一次「小窗没弹」。改成纯 ASCII。
+18. payload 文件不回收：清理用的是 `unref` 的定时器，调用方（各种脚本）先退出就永远不会执行，实测堆了 35 个。改成每次写入前扫掉超过 10 分钟的。
 14. 循环提醒响完之后状态留在 `fired`，而 `tick` 只挑 `active`——于是「每天」和 cron 规则**从第二次开始就再也不会响**。之前所有测试都只验「响一次」，这个盲区因此一直没暴露。
 15. 循环提醒迟到超过容忍窗口时被**整条删掉**：机器睡一夜或 DSH 关一晚，第二天「每天 9 点吃药」就永久消失了。改成循环提醒跳过这一次、排到下一次（`catchUp`），只有一次性提醒才丢。
 16. `*/15` 这类「星号加步长」的 cron 写法没处理对（`Number('*')` → NaN），所有带步长的写法都报「空集合」。

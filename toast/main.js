@@ -54,7 +54,6 @@ const INITIAL_HEIGHT = 150
 const MAX_TTL_SECONDS = 300
 /** 右下角留白。 */
 const MARGIN = 16
-
 /** 解析 `--k=v` 形式的参数。 */
 function parseArgs(argv) {
   const out = {}
@@ -168,6 +167,8 @@ let win = null
 let delivered = false
 /** 自动退出定时器。 */
 let exitTimer = null
+/** `--test-click` 的兜底退出定时器：一键被点到就撤掉（见 `toast:report` 的处理）。 */
+let fallbackExitTimer = null
 
 /**
  * 把窗口贴到当前显示器工作区的右下角。
@@ -273,8 +274,17 @@ app.whenReady().then(() => {
     alwaysOnTop: true,
     skipTaskbar: true,
     show: false,
-    // 不抢焦点：提醒是通知，不该把你正在打字的位置抢走。
-    focusable: false,
+    /**
+     * 能不能被激活。
+     *
+     * 默认**可以**——这一点是被用户的实际操作纠回来的：起初设成 `focusable: false`
+     * （想「别抢打字焦点」），但 Windows 对「不可激活的窗口」的鼠标事件处理并不可靠，
+     * 表现就是卡片上的「收到 / 稍后」点了没反应，而窗口自己到点消失一切正常。
+     *
+     * 不抢焦点仍然做得到，而且做法更正确：用 `showInactive()` 显示——窗口出现在最前，
+     * 但不成为活动窗口，于是你正在打的字不会被打断，同时鼠标事件正常送达。
+     */
+    focusable: String(args.focusable ?? '') !== '0',
     backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -333,8 +343,58 @@ ipcMain.on('toast:empty', () => {
 
 ipcMain.on('toast:report', (_event, line) => {
   log(String(line).slice(0, 300))
+  // 「卡片上的按钮被点了」是自检兜底定时器的唯一解药：它存在的意义是「按钮完全失效时
+  // 别留一个挂死的进程」，而不是打断按钮的后果。
+  if (/clicked/.test(String(line)) && fallbackExitTimer !== null) {
+    clearTimeout(fallbackExitTimer)
+    fallbackExitTimer = null
+    log('button clicked -> fallback exit cancelled')
+  }
 })
 
 ipcMain.on('toast:snooze', (_event, minutes) => {
   snooze(minutes)
 })
+
+/**
+ * 自检：程序化地「点一下卡片上的按钮」。
+ *
+ * 存在的理由：这个窗口只有一个交互——点「收到」关掉它。而这个交互**从来没有被测过**：
+ * 冒烟测试验的是「窗口会不会自己消失」，于是「按钮点了没反应」可以一路通过所有测试
+ * （实测就是这样，用户点了没反应才发现）。
+ *
+ * 它走的是与真人点击**完全相同**的那条路：`element.click()` 触发页面里挂的监听 →
+ * `toastAPI.empty()` → 主进程的 `toast:empty` → 退出。中间任何一环断了，日志里就看得到。
+ *
+ * @param selector - 要点的按钮选择器（默认「收到」）。
+ */
+function selfClick(selector = '.rt-ack') {
+  const probe = `
+    (() => {
+      const button = document.querySelector(${JSON.stringify(selector)})
+      if (button === null) return 'missing'
+      button.click()
+      return 'clicked'
+    })()
+  `
+  win.webContents
+    .executeJavaScript(probe, true)
+    .then((result) => log(`self-click ${selector} => ${String(result)}`))
+    .catch((error) => log(`self-click ${selector} failed: ${String(error && error.message)}`))
+}
+
+if (args['test-click']) {
+  // 页面准备好之后再点：太早点会点到一个还没有卡片的 DOM。
+  setTimeout(() => {
+    if (win !== null && !win.isDestroyed()) selfClick(String(args['test-click']))
+  }, 2500)
+  // 兜底：按钮真没反应时也要退出，否则这个进程会一直挂着。
+  //
+  // 但它只能算「按钮完全没被点到」时的保险：一旦页面报来「某个按钮被点了」，就必须
+  // 撤掉它——否则它会打断点「稍后」的后果（窗口该留着等那次推迟的提醒），
+  // 实测就是这样把「稍后」变成了一次静默失效。
+  fallbackExitTimer = setTimeout(() => {
+    log('self-click fallback exit')
+    quit(0)
+  }, 15000)
+}
