@@ -29,7 +29,9 @@ try {
 
 const reminder = {
   id: `e2e-${Date.now()}`,
-  title: '端到端验证：提醒小窗',
+  // 故意给一个长标题：它会折成好几行，从而真的走一遍「内容变高 → 窗口跟着变高」那条路。
+  // 短标题量出来的高度接近初始值，反而测不出 resize 有没有生效。
+  title: '端到端验证：提醒小窗（这条标题故意写得长一些，用来验证内容变高时窗口会跟着变高，而不是在右边长出滚动条）',
   note: '这条走的是插件真实调用路径（detached + payload 文件 + 剥掉 ELECTRON_RUN_AS_NODE）',
   repeat: 'once',
   status: 'fired'
@@ -62,6 +64,9 @@ const checks = [
   ['页面加载完成', log.includes('页面加载完成')],
   ['渲染器就绪（toast.js 跑了）', log.includes('渲染器就绪')],
   ['payload 已投递', log.includes(`已投递 payload id=${reminder.id}`)],
+  // 长标题一定会让内容高于初始的 150px，所以必须有 resize 请求；这也顺带证明
+  // 「窗口高度跟着内容走」这条链路是通的（右边不会多出滚动条）。
+  ['窗口按内容高度调整过', /resize 请求 height=\d+/.test(log)],
   ['提示音没失败', !log.includes('chime-failed')],
   // 两条正常的退出路径都算通过：卡片自己到时消失（`ttlSeconds`），或者用户点了「收到」
   // 之后卡片清空。这两条都意味着进程干净收尾，没有留下常驻窗口。

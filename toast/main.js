@@ -310,6 +310,9 @@ ipcMain.on('toast:resize', (_event, height) => {
   const value = Math.max(1, Math.min(2000, Math.round(Number(height) || 0)))
   if (value <= 0) return
   const [, current] = win.getSize()
+  // 记一行：排查「右边多了一条滚动条 / 卡片被裁掉」时，先要确认页面报的高度与窗口实际
+  // 高度是不是同一个数。这类问题光看截图看不出来。
+  log(`resize 请求 height=${value} 当前=${current}`)
   if (Math.abs(current - value) < 2) return
   win.setSize(WINDOW_WIDTH, value)
   position()

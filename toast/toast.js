@@ -102,10 +102,31 @@
     playChime()
   }
 
+  /**
+   * 内容需要多高。
+   *
+   * 取三个量的最大值，而不是只看 `body.scrollHeight`：
+   *   · `body.scrollHeight` 在 body 有 margin 或子元素溢出时才是对的；
+   *   · `body.offsetHeight` 是布局盒本身；
+   *   · 列表元素的 `getBoundingClientRect().bottom` 把外边距与圆角都算进去。
+   * 只要有一个比窗口高，就会出现滚动条；所以宁可多给几个像素也不要少给。
+   */
+  function contentHeight() {
+    try {
+      const list = document.getElementById('reminder-toast-list')
+      const rect = list ? list.getBoundingClientRect().bottom : 0
+      return Math.ceil(Math.max(document.body.scrollHeight, document.body.offsetHeight, rect))
+    } catch (err) {
+      return 0
+    }
+  }
+
   /** 通知主进程重新量高度。内容变了就要量，否则窗口要么裁掉卡片要么留一片透明死区。 */
   function resize() {
+    const height = contentHeight()
+    if (height <= 0) return
     try {
-      window.toastAPI.resize(document.body.scrollHeight)
+      window.toastAPI.resize(height)
     } catch (err) {
       /* 忽略 */
     }

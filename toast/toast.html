@@ -13,15 +13,23 @@
       body {
         background: transparent;
         font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+        /* 窗口高度就是「内容高度」——页面量出多少，主进程就把窗口设成多少。
+           所以这里永远不该出现滚动条：多一条滚动条会把卡片挤窄约 15px，右侧还多一道
+           灰边，看起来像窗口漏了一块。 */
         overflow: hidden;
+        scrollbar-width: none;
+      }
+      body::-webkit-scrollbar,
+      #reminder-toast-list::-webkit-scrollbar {
+        width: 0;
+        height: 0;
       }
       #reminder-toast-list {
         display: flex;
         flex-direction: column;
         gap: 10px;
         padding: 10px;
-        max-height: 80vh;
-        overflow-y: auto;
+        overflow: hidden;
       }
       .rt-item {
         width: 340px;
