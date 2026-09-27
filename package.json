@@ -1,14 +1,15 @@
 {
   "name": "dsh-reminder",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "提醒插件：DSH 里说一句话就定时提醒，到点在屏幕右下角弹独立小窗 + 三音提示音（同 electron_demo 的提醒小窗）。",
+  "description": "提醒插件：DSH 里说一句话就定时提醒，到点在屏幕右下角弹独立小窗 + 三音提示音；支持每天、窗口内每小时（cron）。",
   "type": "module",
   "main": "lib/host.js",
   "exports": {
     ".": "./lib/host.js",
     "./client": "./lib/client.js",
     "./parsing": "./lib/parsing.js",
+    "./timing": "./lib/timing.js",
     "./toast": "./lib/toast.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
@@ -16,6 +17,7 @@
   "files": [
     "lib/host.js",
     "lib/parsing.js",
+    "lib/timing.js",
     "lib/window.js",
     "lib/toast.js",
     "lib/client.js",
@@ -30,8 +32,9 @@
   ],
   "license": "MIT",
   "scripts": {
-    "smoke": "node --test smoke/host-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs smoke/lifecycle-check.mjs && node smoke/client-smoke.mjs && node smoke/timer-check.mjs && node smoke/window-smoke.mjs && node smoke/toast-check.mjs && node smoke/e2e-toast.mjs 5",
+    "smoke": "node --test smoke/host-smoke.mjs smoke/timing-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs smoke/lifecycle-check.mjs && node smoke/client-smoke.mjs && node smoke/timer-check.mjs && node smoke/window-smoke.mjs && node smoke/toast-check.mjs && node smoke/e2e-toast.mjs 5",
     "smoke:host": "node --test smoke/host-smoke.mjs",
+    "smoke:timing": "node --test smoke/timing-smoke.mjs",
     "smoke:wire": "node --test smoke/wire-smoke.mjs",
     "smoke:http": "node --test smoke/http-smoke.mjs",
     "smoke:lifecycle": "node --test smoke/lifecycle-check.mjs",

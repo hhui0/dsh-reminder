@@ -211,21 +211,25 @@ describe('本机 HTTP 路线', () => {
       assert.deepEqual(empty.body.value.reminders, [])
       assert.ok(Date.now() - started >= 90, `pending 提前返回了：${Date.now() - started}ms`)
 
-      // 造一条「已经响过」的循环提醒：它在清单里是 fired，所以会被推给页面。
-      // 直接跑一次 tick 而不是等那个每秒的定时器：测试不该把时间花在等间隔上。
+      // 造一条**一次性**提醒（0.6 秒后到点），让长轮询挂住，看它会不会在到点的那一刻
+      // 被唤醒。这是「到点就弹窗」的关键一步：唤醒晚了，用户看到的就是延迟十几秒的提醒。
+      //
+      // 注意提醒本身在响的**同一步**里就从清单删掉了，所以这里断言的是「唤醒」，
+      // 而不是「pending 里还能查到它」——后者是早期实现的误解，真相是页面靠唤醒拿到数据。
       const service = root.get(SERVICE)
-      const reminder = await service.store.create({ title: '已响', afterMinutes: 1, repeat: 'daily' })
-      await service.store.fire(reminder.id)
+      const reminder = await service.store.create({ title: '待确认', afterMinutes: 0.01, repeat: 'once' })
+      const walkUp = pending('timeout=2000')
+      const walkStart = Date.now()
+      await new Promise((resolve) => setTimeout(resolve, 900))
       await service.scheduler.tick()
+      const woken = await walkUp
+      const wokeAfter = Date.now() - walkStart
+      assert.equal(woken.body.ok, true)
+      assert.ok(wokeAfter < 2200, `长轮询没有被唤醒（等了 ${wokeAfter}ms）`)
+      assert.equal((await call(API.list)).body.value.reminders.length, 0, '一次性提醒响完应当已从清单移除')
+      assert.equal(reminder.repeat, 'once')
 
-      const pushed = await pending('timeout=100')
-      assert.deepEqual(pushed.body.value.reminders.map((item) => item.id), [reminder.id])
-
-      // 页面把 id 放进 seen 之后再挂：同一条不会再被推一次。
-      const deduped = await pending(`timeout=100&seen=${reminder.id}`)
-      assert.deepEqual(deduped.body.value.reminders, [])
-
-      // dismiss 不报错（一次性提醒早已从清单里消失，这一步只是收尾）。
+      // dismiss 对已经消失的提醒不该报错（页面点「知道了」时打的就是它）。
       const dismissed = await call(API.dismiss, { id: reminder.id })
       assert.equal(dismissed.body.ok, true)
     } finally {

@@ -37,9 +37,16 @@ DSH 的提醒插件：**说一句话就定时提醒，到点在屏幕右下角�
 | `1h30m`、`2 小时 10 分钟` | 多个片段累加 |
 | `19:30`、`8点半`、`20点` | 今天的这个钟点；已经过了就顺延到明天 |
 | `明天 08:00`、`后天 9:15` | 带相对日期的钟点 |
-| `2026-09-28 07:30`、`2026-09-28T07:30` | 本地时区的绝对时间 |
+| `2026-09-28 07:30` | 本地时区的绝对时间 |
+| `9:00-22:00`（`window`） | **窗口内每小时**：9 点到 22 点每个整点 |
+| `0 9-22 * * *`（`cron`） | 同上；也支持 `*/15`、`9,12,18`、`9-22/2` 这类写法 |
 
-「每天」这种重复只能走工具（`repeat: "daily"`）或设置页里的「重复」下拉框。
+`repeat` 只有 `once` / `daily` 两个值；「窗口内每小时」这类循环请用 `cron` 或 `window`，
+一条就够，别铺 14 条 daily（那样改一次要改 14 条）。命令行的写法是
+`/reminder 每天 9:00-22:00 喝水`。
+
+cron 是**子集**，不是完整实现：日 / 月 / 周三个字段只接受 `*`，时区只接受本机时区。
+不满足时会**明确报错**——假装支持「每月 1 号」然后静默算错，比拒绝它危险得多。
 
 ## 到点时会发生什么
 
@@ -98,7 +105,8 @@ DSH 的提醒插件：**说一句话就定时提醒，到点在屏幕右下角�
 
 ```
 lib/parsing.js   时间解析与领域整形（纯函数，无 DSH 依赖，因此可单元测试）
-lib/host.js      ReminderStore（持久化 + 到点判定）、ReminderScheduler（定时器 + 长轮询唤醒）、
+lib/timing.js    cron 子集：解析、窗口简写、nextAfter、文案（同样纯函数）
+lib/host.js      ReminderStore（持久化 + 到点判定 + 迟到处理）、ReminderScheduler（定时器 + 长轮询唤醒）、
                  ReminderService（Cordis 服务）、reminder_* 工具、/reminder 命令、
                  /dsh-reminder/api/call 与 /api/pending 两条本机路由
 lib/toast.js     找 Electron、写 payload 文件、detached 拉起提醒小窗
@@ -108,6 +116,18 @@ toast/toast.js   小窗的页面：卡片、三音提示音、主题（与 elect
 toast/preload.js contextBridge 暴露的最小 API
 lib/client.js    settings.section 设置页 + 可选的 shell.overlay 浮层 + 长轮询
 ```
+
+**三种循环语义**，别混：
+
+| 语义 | 字段 | 响完之后 |
+|---|---|---|
+| 一次性 | `at` / `after_minutes` | 从清单里删掉 |
+| 每天同一钟点 | `at` + `repeat: daily` | 排到明天同一时刻；状态回到 `active` |
+| 规则（窗口内每小时等） | `cron` / `window` | 按规则算下一次；状态回到 `active` |
+
+「迟到」对这三种的结局也不同：一次性提醒迟到超过容忍窗口（默认 120 分钟）就丢掉；
+**循环提醒跳过这一次、排到下一次，规则本身必须留着**——早先的实现在这里把整条删掉，
+于是机器睡一夜之后「每天 9 点吃药」会永久消失，而用户要到某天才发现。
 
 几个刻意的取舍：
 
@@ -132,18 +152,19 @@ node smoke/e2e-toast.mjs 6      # 走插件的真实调用路径，弹一个小�
 
 | 脚本 | 条数 | 覆盖什么 |
 |---|---|---|
-| `smoke/host-smoke.mjs` | 33 | 时间解析（含秒级、`半分钟`）、持久化、到点判定、循环排程、迟到丢弃、长轮询唤醒与去重、默认路径不互撞 |
+| `smoke/host-smoke.mjs` | 36 | 时间解析（含秒级、`半分钟`）、持久化、到点判定、循环排程、迟到处理、长轮询唤醒、默认路径不互撞、cron 规则 |
+| `smoke/timing-smoke.mjs` | 13 | cron 子集：整点/列表/步长、非法写法报错、`nextAfter` 的跨天与端点、窗口简写、文案 |
 | `smoke/wire-smoke.mjs` | 3 | 用真的 Cordis 上下文激活：服务挂成 `ctx.get('reminders')`、三个工具与 `/reminder` 命令、路由注册、卸载后定时器停止 |
-| `smoke/http-smoke.mjs` | 5 | `/api/call` 的方法派发与信封、坏输入的错误码、`/api/pending` 的超时与去重、只有本机能访问 |
-| `smoke/lifecycle-check.mjs` | 1 | **真实生命周期 + 真实时间**：激活后定时器自己在走、到点写成「已响」、卸载后停表 |
-| `smoke/client-smoke.mjs` | 49 | 模块加载、两个座位注册、到点弹窗、按钮打到 host、设置页、静音真的没声音、关掉浮层后不弹也不响 |
+| `smoke/http-smoke.mjs` | 5 | `/api/call` 的方法派发与信封、坏输入的错误码、`/api/pending` 的超时与唤醒、只有本机能访问 |
+| `smoke/lifecycle-check.mjs` | 1 | **真实生命周期 + 真实时间**：激活后定时器自己在走、到点写成「已响」、循环回到 `active`、卸载后停表 |
+| `smoke/client-smoke.mjs` | 54 | 模块加载、两个座位注册、到点弹窗、按钮打到 host、设置页、静音真的没声音、关掉浮层后不弹也不响、窗口优先于时间 |
 | `smoke/timer-check.mjs` | 6 | 真实时间下的 store + scheduler（不手动调 `tick()`） |
 | `smoke/window-smoke.mjs` | 10 | PowerShell 探测、脚本可解析、`-Action status` 真跑一次（实测 `window=5243272 rect=1936x1048@(-8,-8) visible=True iconic=False`） |
 | `smoke/toast-check.mjs` | 28 | 探测/payload/参数/env 清理等纯逻辑 + **真跑一次小窗**（页面加载、渲染器报到、投递、响铃没失败、干净退出） |
 | `smoke/e2e-toast.mjs` | 6 | 走插件的真实调用路径（detached + payload 文件 + 剥掉 `ELECTRON_RUN_AS_NODE`）拉起小窗，并用长标题逼出一次「按内容调高度」 |
 | `smoke/live-check.mjs` | 6 | 打真实宿主：`/api/call` 建一条十几秒后的提醒，核对清单被消费 + 小窗日志被投递 |
 
-另有五个**现场排查工具**（注释里写清了各自的坑）：`delivery-check.mjs`（自建提醒 + 盯 `/api/pending`）、`clock-check.mjs`（比对宿主与本机时钟）、`fire-check.mjs`（采样窗口是否前台）、`rapid-fire-check.mjs`（250ms 探针）、`timer-detect.mjs`（插一条过期提醒，看宿主会不会改写清单）。
+另有几个**现场排查/辅助工具**（注释里写清了各自的坑）：`delivery-check.mjs`（自建提醒 + 盯 `/api/pending`）、`clock-check.mjs`（比对宿主与本机时钟）、`fire-check.mjs`（采样窗口是否前台）、`rapid-fire-check.mjs`（250ms 探针）、`timer-detect.mjs`（插一条过期提醒，看宿主会不会改写清单）、`create-hourly-water.mjs`（用 14 条 daily 铺出「窗口内每小时」——cron 支持之前的临时做法）。
 
 这套测试抓出来的真实缺陷（不是补上去的装饰）：
 
@@ -160,6 +181,10 @@ node smoke/e2e-toast.mjs 6      # 走插件的真实调用路径，弹一个小�
 11. 小窗卡片列表上的 `max-height: 80vh` + `overflow-y: auto`：窗口高度本来就等于内容高度，这条规则只会在内容偶尔高出一两像素时长出一条滚动条，而滚动条又把卡片挤窄、折出更多行。改成完全不滚动，并把「量高度」统一到一个函数。
 12. **清单与偏好撞成同一个文件**：早先只有一个回退路径、空值一律指向 `reminders.json`；而 Profile 的 patch 是整体替换 `config`（不是合并），于是「只覆盖了 `traceLog`」的配置下偏好文件也变成了清单文件。拆成两个解析函数，并加了一道「两者相同就换回默认偏好文件」的兜底。
 13. 页面那半边一度完全没有在轮询：原因是浏览器缓存了**旧的客户端 bundle**（里面根本没有后来的客户端代码）。硬刷新（Ctrl+Shift+R）之后 `reminder-trace.log` 立刻出现 `apply.enter v=2` → `loop.start` → 每 20 秒一轮 `poll.empty`。**改完客户端代码要硬刷新页面，否则看到的是旧包；改完 Host 代码要重启 DSH，ESM 是按 URL 缓存的。**
+14. 循环提醒响完之后状态留在 `fired`，而 `tick` 只挑 `active`——于是「每天」和 cron 规则**从第二次开始就再也不会响**。之前所有测试都只验「响一次」，这个盲区因此一直没暴露。
+15. 循环提醒迟到超过容忍窗口时被**整条删掉**：机器睡一夜或 DSH 关一晚，第二天「每天 9 点吃药」就永久消失了。改成循环提醒跳过这一次、排到下一次（`catchUp`），只有一次性提醒才丢。
+16. `*/15` 这类「星号加步长」的 cron 写法没处理对（`Number('*')` → NaN），所有带步长的写法都报「空集合」。
+17. 拉起的 payload 文件不回收，实测跑几十次堆了 35 个（见第 12 条同一批修复）。
 
 ## 已知限制
 

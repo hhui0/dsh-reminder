@@ -529,6 +529,36 @@ check('settings: create 带上了标题', created?.args?.title === '喝水', JSO
 check('settings: create 带上了时间字符串', created?.args?.at === '45', JSON.stringify(created?.args))
 check('settings: create 带上了重复方式', created?.args?.repeat === 'once', JSON.stringify(created?.args))
 
+// 循环窗口优先于「时间」：填了窗口就发 window，并且**不带** at / repeat——
+// 两个都发只会让「到底按哪个」变成一个问题。
+const windowInput = [...pageContainer.querySelectorAll('input[type=text]')][2]
+check('settings: 有「循环窗口」输入框', windowInput !== undefined)
+let windowError = null
+try {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+    const setText = (element, value) => {
+      setter.call(element, value)
+      element.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    }
+    // 标题在上一轮提交成功后已经被清空，这里必须重新填——否则表单会因为在标题上
+    // 校验失败而直接返回，窗口那条分支根本走不到（第一版测试就是这么假通过的）。
+    setText(titleInput, '喝水')
+    setText(windowInput, '9:00-22:00')
+  })
+  await act(async () => {
+    pageContainer.querySelector('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }))
+  })
+} catch (error) {
+  windowError = error
+}
+await tick(30)
+check('settings: 填窗口后提交不抛错', windowError === null, String(windowError))
+const windowed = calls.filter((item) => item.method === 'create').at(-1)
+check('settings: 窗口请求带上了 window', windowed?.args?.window === '9:00-22:00', JSON.stringify(windowed?.args))
+check('settings: 窗口请求不带 at', windowed?.args?.at === undefined, JSON.stringify(windowed?.args))
+check('settings: 窗口请求不带 repeat', windowed?.args?.repeat === undefined, JSON.stringify(windowed?.args))
+
 await act(async () => {
   pageRoot.unmount()
 })

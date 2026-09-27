@@ -22,7 +22,16 @@ import {
   parseRelativeMs,
   parseWhen
 } from '../lib/parsing.js'
-import { ReminderScheduler, ReminderStore, isDue, normalizeSettings, resolveDataFile, resolveSettingsFile, writeJsonAtomic } from '../lib/host.js'
+import {
+  ReminderScheduler,
+  ReminderStore,
+  filterPending,
+  isDue,
+  normalizeSettings,
+  resolveDataFile,
+  resolveSettingsFile,
+  writeJsonAtomic
+} from '../lib/host.js'
 
 /** 一个随测试推进的假时钟。 */
 function makeClock(start) {
@@ -290,10 +299,67 @@ describe('ReminderStore', () => {
     assert.equal(result.fired.length, 2)
     const left = await store.list()
     assert.deepEqual(left.map((item) => item.title), ['每天'])
-    assert.equal(left[0].status, 'fired')
+    // 循环提醒响完回到 `active`（`fired` 只表示「刚响过」，不是「等人确认」）：
+    // 留在 `fired` 的话，`tick` 只挑 `active`，于是从第二次开始就再也不会响。
+    assert.equal(left[0].status, 'active')
     assert.equal(left[0].fireCount, 1)
     assert.ok(left[0].scheduledAt > clock.now())
     assert.equal(formatLocal(left[0].scheduledAt).slice(11), formatLocal(daily.scheduledAt).slice(11))
+  })
+
+  it('cron 提醒：一条规则覆盖「窗口内每小时」，响完排到下一个整点', async () => {
+    // 2026-09-27 10:00 起，规则是每天 9:00-22:00 整点 → 下一次应当是 11:00。
+    const clock = makeClock(BASE)
+    const store = new ReminderStore({
+      dataFile: join(dir, 'cron.json'),
+      settingsFile: join(dir, 'cron-settings.json'),
+      now: clock.now,
+      graceMinutes: 120
+    })
+    const created = await store.create({ title: '喝水', cron: '0 9-22 * * *' })
+    assert.equal(created.repeat, 'daily')
+    assert.equal(created.rule.expression, '0 9-22 * * *')
+    assert.equal(formatLocal(created.nextAt), '2026-09-27 11:00')
+    // 还没到点：tick 不该响。
+    assert.deepEqual((await store.tick()).fired, [])
+
+    // 走到 11:00，应当响一次，并且排到 12:00。
+    clock.advance(60 * 60000)
+    const result = await store.tick()
+    assert.deepEqual(
+      result.fired.map((item) => item.id),
+      [created.id]
+    )
+    const left = await store.list()
+    assert.equal(left.length, 1, '规则式提醒不该从清单里消失')
+    assert.equal(left[0].fireCount, 1)
+    assert.equal(formatLocal(left[0].nextAt), '2026-09-27 12:00')
+
+    // 跳到 22:00。这一次的落点「迟到」了 2 小时（超过容忍窗口），所以它**不该补响**，
+    // 而应当被排到第二天早上 9:00——这正是 `catchUp` 的意义：错过的那一次跳过，
+    // 规则本身必须留着。早先的实现在这里把它整条删掉，「每天 9 点吃药」于是永久消失。
+    clock.advance(11 * 3600000)
+    const late = await store.tick()
+    assert.equal(late.fired.length, 0, '迟到超过容忍窗口的一次不该补响')
+    assert.equal(late.recurring.length, 1)
+    const after = (await store.list())[0]
+    assert.equal(after.status, 'active')
+    assert.equal(formatLocal(after.nextAt), '2026-09-28 09:00')
+    assert.equal(after.fireCount, 1, '被跳过的这一次不算响过')
+
+    // 第二天 9:00：必须还能响（守的是「循环提醒只响一次 / 迟到就被删」这两个缺陷）。
+    clock.advance(11 * 3600000)
+    const nextDay = await store.tick()
+    assert.equal(nextDay.fired.length, 1)
+    assert.equal((await store.list())[0].fireCount, 2)
+  })
+
+  it('cron 提醒：窗口简写也能用，并且语法错会当场报错', async () => {
+    const store = makeStore('cron2')
+    const created = await store.create({ title: '喝水', window: '9:00-22:00' })
+    assert.equal(created.rule.expression, '0 9-22 * * *')
+    await assert.rejects(() => store.create({ title: '坏规则', cron: '0 9 * * 1' }), /只支持/)
+    await assert.rejects(() => store.create({ title: '坏规则2', cron: '0 25 * * *' }), /超出范围/)
   })
 
   it('迟到超过容忍窗口的提醒直接丢掉，不补响', async () => {
@@ -390,25 +456,40 @@ describe('ReminderScheduler', () => {
     assert.ok(Date.now() - started < 2000, 'wake() 之后仍然挂到了超时')
   })
 
-  it('pending() 用 seen 去重，同一个弹窗不会推两次', async () => {
+  it('循环提醒不推给页面；一次性提醒才需要确认，且 seen 能去重', async () => {
     const clock = makeClock(BASE)
-    const store = new ReminderStore({
-      dataFile: join(dir, 'seen.json'),
-      settingsFile: join(dir, 'seen-settings.json'),
-      now: clock.now
+    const scheduler = new ReminderScheduler({
+      store: new ReminderStore({
+        dataFile: join(dir, 'seen.json'),
+        settingsFile: join(dir, 'seen-settings.json'),
+        now: clock.now
+      }),
+      now: clock.now,
+      intervalMs: 20
     })
-    const scheduler = new ReminderScheduler({ store, now: clock.now, intervalMs: 20 })
+    const store = scheduler.store
     const daily = await store.create({ title: '每天', afterMinutes: 1, repeat: 'daily' })
+    await store.create({ title: '一次性', afterMinutes: 1 })
     clock.advance(61000)
     await scheduler.tick()
 
-    const first = (await store.list()).filter((item) => item.status === 'fired')
-    assert.equal(first.length, 1)
-    assert.equal(first[0].id, daily.id)
+    // 循环提醒响完回到 active：`filterPending` 因此永远不会把它算成「等确认」，
+    // 每小时一次的喝水提醒也就不会次次盖住整个 DSH 界面。
+    const listed = await store.list()
+    assert.equal(listed.find((item) => item.id === daily.id).status, 'active')
 
-    // 页面第二次挂长轮询时带上 seen，就必须拿到空列表。
-    const seen = new Set([daily.id])
-    const second = (await store.list()).filter((item) => item.status === 'fired' && !seen.has(item.id))
-    assert.equal(second.length, 0)
+    const now = clock.now()
+    const rows = [
+      { id: 'fired-once', title: '需要确认', repeat: 'once', status: 'fired', firedAt: now },
+      { id: 'fired-daily', title: '循环', repeat: 'daily', status: 'fired', firedAt: now },
+      { id: 'active-once', title: '还没到点', repeat: 'once', status: 'active', firedAt: 0 },
+      { id: 'old-once', title: '很久以前响的', repeat: 'once', status: 'fired', firedAt: now - 11 * 60000 }
+    ]
+    assert.deepEqual(
+      filterPending(rows, { now }).map((item) => item.id),
+      ['fired-once'],
+      '只有「刚响过的一次性提醒」该被推给页面'
+    )
+    assert.deepEqual(filterPending(rows, { now, seenIds: ['fired-once'] }), [])
   })
 })

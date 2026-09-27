@@ -7,6 +7,8 @@
  * 一遍，于是定时器刚建好就被停掉。症状是：插件激活成功、工具注册成功、清单能读能写，
  * 就是**永远不响**。
  *
+ * 顺带也守住了「循环提醒响完必须回到 active」：停在 `fired` 会让它从第二次起不再响。
+ *
  * 所以这里不用假时钟，而是真的等一秒多，并且用的是 `apply` 本身（走真实的
  * plugin/fiber 生命周期），而不是手工 new 一个 Scheduler。
  *
@@ -69,7 +71,10 @@ describe('服务在真实生命周期下的调度', () => {
 
     const raw = JSON.parse(await readFile(dataFile, 'utf8'))
     const row = raw.reminders.find((item) => item.id === reminder.id)
-    assert.equal(row.status, 'fired')
+    // 循环提醒响完回到 `active` 并排到下一次：停在 `fired` 会让它从此不再响
+    // （`tick` 只挑 `active`），而 `fired` 对循环提醒也不代表「等人确认」。
+    assert.equal(row.status, 'active')
+    assert.equal(row.fireCount, 1)
     assert.ok(row.scheduledAt > Date.now(), '循环提醒没有排到下一次')
 
     await fiber.dispose()
