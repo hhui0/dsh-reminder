@@ -130,6 +130,10 @@ describe('apply() 接线', () => {
     // 这里只断言定时器，不断言假的 tools/commands 列表：那三个假服务只是记录器，
     // 它们返回的 disposer 不是 cordis 注册的，所以 cordis 不会在卸载时调用它们——
     // 断言它们会得到一条「测试自己的替身不完整」的假失败，而真正要守的契约是定时器。
+    //
+    // 注意这里**只能**断言 `timer` 存在：`ctx.plugin()` 的子 fiber 是异步启动的，
+    // 定时器是否真的在走要等真实时间过去才知道，那是 `smoke/delivery-check.mjs`
+    // （打真宿主的 /api/pending）负责的事。这条断言守的是「不早不晚地建起来」。
     assert.notEqual(service.scheduler.timer, undefined, '定时器没起来')
     await fiber.dispose()
     await new Promise((resolve) => setTimeout(resolve, 20))
