@@ -1,0 +1,16 @@
+# dsh-reminder 的 bundle patch。
+#
+# 一行同时激活这个包的两半：
+#   · Host 半边（lib/host.js）注册 reminders 服务、reminder_* 工具、/reminder 命令，
+#     以及 /dsh-reminder/api 这条给页面用的本机 HTTP 路由；
+#   · Web Client 半边（package.json 的 dsh.client → lib/client.js）负责到点弹窗、
+#     提示音和「提醒」设置页。
+#
+# dataFile 指向磁盘上的提醒清单，默认落在 DSH home。settingsFile 单独存放偏好，
+# 这样删掉提醒清单不会顺手把偏好也清掉。
+- insert:
+    - id: reminder
+      name: 'dsh-reminder'
+      config:
+        dataFile: !!js dshHomePath('reminders.json')
+        settingsFile: !!js dshHomePath('reminder-settings.json')

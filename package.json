@@ -1,0 +1,53 @@
+{
+  "name": "dsh-reminder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "提醒插件：DSH 里说一句话就定时提醒，到点弹出窗口 + 提示音，还能把 DSH 窗口唤到前台。",
+  "type": "module",
+  "main": "lib/host.js",
+  "exports": {
+    ".": "./lib/host.js",
+    "./client": "./lib/client.js",
+    "./parsing": "./lib/parsing.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/host.js",
+    "lib/parsing.js",
+    "lib/window.js",
+    "lib/client.js",
+    "scripts/dsh-window.ps1",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "smoke": "node --test smoke/host-smoke.mjs smoke/wire-smoke.mjs smoke/http-smoke.mjs && node smoke/client-smoke.mjs && node smoke/window-smoke.mjs",
+    "smoke:host": "node --test smoke/host-smoke.mjs",
+    "smoke:wire": "node --test smoke/wire-smoke.mjs",
+    "smoke:http": "node --test smoke/http-smoke.mjs",
+    "smoke:client": "node smoke/client-smoke.mjs",
+    "smoke:window": "node smoke/window-smoke.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "~3.18.4"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4"
+  },
+  "dsh": {
+    "meta": {
+      "title": "提醒",
+      "description": "说一句「10 分钟后提醒我」，到点弹窗 + 提示音"
+    },
+    "client": {
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": [
+        "./cordis.patch.yml"
+      ]
+    }
+  }
+}

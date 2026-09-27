@@ -1,0 +1,10 @@
+{
+  "name": "dsh-reminder-smoke-fixtures",
+  "private": true,
+  "description": "测试用的第三方夹具（React / jsdom）。刻意不放进插件自己的 node_modules：DSH 是就地加载这个包的，把一份测试用的 React 放到被加载的路径上，等于把别人的框架塞进运行时。",
+  "dependencies": {
+    "jsdom": "^24.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
