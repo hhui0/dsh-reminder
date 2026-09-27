@@ -132,7 +132,7 @@ node smoke/e2e-toast.mjs 6      # 走插件的真实调用路径，弹一个小�
 
 | 脚本 | 条数 | 覆盖什么 |
 |---|---|---|
-| `smoke/host-smoke.mjs` | 32 | 时间解析（含秒级、`半分钟`）、持久化、到点判定、循环排程、迟到丢弃、长轮询唤醒与去重 |
+| `smoke/host-smoke.mjs` | 33 | 时间解析（含秒级、`半分钟`）、持久化、到点判定、循环排程、迟到丢弃、长轮询唤醒与去重、默认路径不互撞 |
 | `smoke/wire-smoke.mjs` | 3 | 用真的 Cordis 上下文激活：服务挂成 `ctx.get('reminders')`、三个工具与 `/reminder` 命令、路由注册、卸载后定时器停止 |
 | `smoke/http-smoke.mjs` | 5 | `/api/call` 的方法派发与信封、坏输入的错误码、`/api/pending` 的超时与去重、只有本机能访问 |
 | `smoke/lifecycle-check.mjs` | 1 | **真实生命周期 + 真实时间**：激活后定时器自己在走、到点写成「已响」、卸载后停表 |
@@ -140,7 +140,8 @@ node smoke/e2e-toast.mjs 6      # 走插件的真实调用路径，弹一个小�
 | `smoke/timer-check.mjs` | 6 | 真实时间下的 store + scheduler（不手动调 `tick()`） |
 | `smoke/window-smoke.mjs` | 10 | PowerShell 探测、脚本可解析、`-Action status` 真跑一次（实测 `window=5243272 rect=1936x1048@(-8,-8) visible=True iconic=False`） |
 | `smoke/toast-check.mjs` | 28 | 探测/payload/参数/env 清理等纯逻辑 + **真跑一次小窗**（页面加载、渲染器报到、投递、响铃没失败、干净退出） |
-| `smoke/e2e-toast.mjs` | 5 | 走插件的真实调用路径（detached + payload 文件 + 剥掉 `ELECTRON_RUN_AS_NODE`）拉起小窗并核对日志 |
+| `smoke/e2e-toast.mjs` | 6 | 走插件的真实调用路径（detached + payload 文件 + 剥掉 `ELECTRON_RUN_AS_NODE`）拉起小窗，并用长标题逼出一次「按内容调高度」 |
+| `smoke/live-check.mjs` | 6 | 打真实宿主：`/api/call` 建一条十几秒后的提醒，核对清单被消费 + 小窗日志被投递 |
 
 另有五个**现场排查工具**（注释里写清了各自的坑）：`delivery-check.mjs`（自建提醒 + 盯 `/api/pending`）、`clock-check.mjs`（比对宿主与本机时钟）、`fire-check.mjs`（采样窗口是否前台）、`rapid-fire-check.mjs`（250ms 探针）、`timer-detect.mjs`（插一条过期提醒，看宿主会不会改写清单）。
 
@@ -156,6 +157,9 @@ node smoke/e2e-toast.mjs 6      # 走插件的真实调用路径，弹一个小�
 8. 拉起小窗时继承了宿主自己的 `ELECTRON_RUN_AS_NODE=1`，小窗退化回纯 Node。
 9. `requireAck` 和 `ttlSeconds` 抢方向盘，导致「设了 6 秒自动关闭却挂到 300 秒」。
 10. 页面默认盖浮层，与小窗同时出现（双弹/双响）。
+11. 小窗卡片列表上的 `max-height: 80vh` + `overflow-y: auto`：窗口高度本来就等于内容高度，这条规则只会在内容偶尔高出一两像素时长出一条滚动条，而滚动条又把卡片挤窄、折出更多行。改成完全不滚动，并把「量高度」统一到一个函数。
+12. **清单与偏好撞成同一个文件**：早先只有一个回退路径、空值一律指向 `reminders.json`；而 Profile 的 patch 是整体替换 `config`（不是合并），于是「只覆盖了 `traceLog`」的配置下偏好文件也变成了清单文件。拆成两个解析函数，并加了一道「两者相同就换回默认偏好文件」的兜底。
+13. 页面那半边一度完全没有在轮询：原因是浏览器缓存了**旧的客户端 bundle**（里面根本没有后来的客户端代码）。硬刷新（Ctrl+Shift+R）之后 `reminder-trace.log` 立刻出现 `apply.enter v=2` → `loop.start` → 每 20 秒一轮 `poll.empty`。**改完客户端代码要硬刷新页面，否则看到的是旧包；改完 Host 代码要重启 DSH，ESM 是按 URL 缓存的。**
 
 ## 已知限制
 
