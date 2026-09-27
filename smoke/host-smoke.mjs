@@ -22,7 +22,7 @@ import {
   parseRelativeMs,
   parseWhen
 } from '../lib/parsing.js'
-import { ReminderScheduler, ReminderStore, isDue, normalizeSettings, writeJsonAtomic } from '../lib/host.js'
+import { ReminderScheduler, ReminderStore, isDue, normalizeSettings, resolveDataFile, resolveSettingsFile, writeJsonAtomic } from '../lib/host.js'
 
 /** 一个随测试推进的假时钟。 */
 function makeClock(start) {
@@ -197,6 +197,25 @@ describe('writeJsonAtomic', () => {
       assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { version: 1, reminders: [{ id: 'a' }] })
     } finally {
       await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('默认路径解析', () => {
+  it('清单与偏好各走各的回退，空值也不会撞在一起', () => {
+    const previous = process.env.DSH_HOME
+    process.env.DSH_HOME = 'C:\\tmp\\dsh-home-x'
+    try {
+      // 这一条守的是一个真实的线上 bug：早先两者共用一个回退路径，于是「Config 只覆盖了
+      // traceLog」时 settingsFile 也变成了 reminders.json，写一次偏好就把提醒清单覆盖掉了。
+      assert.equal(resolveDataFile(''), join('C:\\tmp\\dsh-home-x', 'reminders.json'))
+      assert.equal(resolveSettingsFile(''), join('C:\\tmp\\dsh-home-x', 'reminder-settings.json'))
+      assert.notEqual(resolveDataFile(''), resolveSettingsFile(''))
+      assert.equal(resolveDataFile('C:\\custom\\a.json'), 'C:\\custom\\a.json')
+      assert.equal(resolveSettingsFile('C:\\custom\\b.json'), 'C:\\custom\\b.json')
+    } finally {
+      if (previous === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previous
     }
   })
 })
